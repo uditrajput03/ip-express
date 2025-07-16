@@ -23,7 +23,7 @@ app.use(async (req, res, next) => {
       encrypted: !!req.socket.encrypted,
       protocol: req.protocol,
     },
-    
+
     // Header-based detection
     headers: {
       xForwardedFor: req.headers['x-forwarded-for'],
@@ -32,13 +32,13 @@ app.use(async (req, res, next) => {
       trueClientIp: req.headers['true-client-ip'],
       forwarded: req.headers['forwarded'],
     },
-    
+
     // Express built-in detection
     express: {
       ip: req.ip,
       ips: req.ips,
     },
-    
+
     // Custom detection
     detected: {
       ipv4: null,
@@ -47,12 +47,12 @@ app.use(async (req, res, next) => {
       source: null,
     }
   };
-  
+
   // Extract IPv4 from IPv4-mapped IPv6 if present
   const ip = req.socket.remoteAddress;
   if (ip && ip.includes(':')) {
     req.ipInfo.detected.ipv6 = ip;
-    
+
     if (ip.startsWith('::ffff:')) {
       const ipv4 = ip.substring(7);
       req.ipInfo.detected.ipv4 = ipv4;
@@ -63,7 +63,7 @@ app.use(async (req, res, next) => {
     req.ipInfo.detected.ipv4 = ip;
     req.ipInfo.detected.source = 'direct-connection';
   }
-  
+
   // Check headers for IPv4 if not found yet
   if (!req.ipInfo.detected.ipv4) {
     // Try X-Forwarded-For
@@ -78,7 +78,7 @@ app.use(async (req, res, next) => {
         }
       }
     }
-    
+
     // Try other headers if still not found
     if (!req.ipInfo.detected.ipv4) {
       const headersToCheck = [
@@ -86,7 +86,7 @@ app.use(async (req, res, next) => {
         { name: 'cf-connecting-ip', value: req.headers['cf-connecting-ip'] },
         { name: 'true-client-ip', value: req.headers['true-client-ip'] }
       ];
-      
+
       for (const header of headersToCheck) {
         if (header.value && /^\d+\.\d+\.\d+\.\d+$/.test(header.value)) {
           req.ipInfo.detected.ipv4 = header.value;
@@ -96,7 +96,7 @@ app.use(async (req, res, next) => {
       }
     }
   }
-  
+
   next();
 });
 
@@ -130,6 +130,13 @@ app.get('/', (req, res) => {
         <p><strong>IPv6:</strong> ${req.ipInfo.detected.ipv6 || 'Not detected'}</p>
         <p><strong>Detection source:</strong> ${req.ipInfo.detected.source || 'Unknown'}</p>
       </div>
+            <div class="ip-list">
+        <h2>Your Public IP Addresses (via WebRTC STUN):</h2>
+        <ul id="ip-list">
+          <li>Detecting...</li>
+        </ul>
+        <div class="note" id="note"></div>
+      </div>
       <div class="ip-box">
         <h2>Raw Connection Data</h2>
         <p><strong>Direct connection IP:</strong> ${req.ipInfo.connection.direct}</p>
@@ -153,13 +160,7 @@ app.get('/', (req, res) => {
         <p>External verification: <a href="/api/ip/verify">/api/ip/verify</a></p>
         <p>WebRTC IP detection: <a href="/webrtc">/webrtc</a></p>
       </div>
-      <div class="ip-list">
-        <h2>Your Public IP Addresses (via WebRTC STUN):</h2>
-        <ul id="ip-list">
-          <li>Detecting...</li>
-        </ul>
-        <div class="note" id="note"></div>
-      </div>
+
       <div class="footer">
         <p>Server Time (UTC): ${new Date().toISOString()}</p>
         <p>Request ID: ${Math.random().toString(36).substring(2, 15)}</p>
@@ -274,24 +275,24 @@ app.get('/api/ip/verify', async (req, res) => {
       { name: 'ipv4.jsonip.com', url: 'https://ipv4.jsonip.com/' },
       { name: 'ipify', url: 'https://api.ipify.org?format=json' }
     ];
-    
+
     const results = await Promise.allSettled(
-      services.map(service => 
+      services.map(service =>
         axios.get(service.url, { timeout: 5000 })
-          .then(response => ({ 
-            service: service.name, 
-            success: true, 
+          .then(response => ({
+            service: service.name,
+            success: true,
             ip: response.data.ip,
             raw: response.data
           }))
-          .catch(error => ({ 
-            service: service.name, 
-            success: false, 
-            error: error.message 
+          .catch(error => ({
+            service: service.name,
+            success: false,
+            error: error.message
           }))
       )
     );
-    
+
     // DNS lookup attempt if we have a hostname
     let dnsResult = null;
     if (req.ipInfo.detected.ipv6) {
@@ -308,7 +309,7 @@ app.get('/api/ip/verify', async (req, res) => {
         dnsResult = { error: e.message };
       }
     }
-    
+
     res.json({
       detected: {
         ipv4: req.ipInfo.detected.ipv4,
@@ -331,7 +332,7 @@ app.get('/api/ip/:format', (req, res) => {
     ip: req.ipInfo.detected.ipv4 || req.ipInfo.detected.ipv6,
     timestamp: new Date().toISOString()
   };
-  
+
   switch (format) {
     case 'xml':
       res.setHeader('Content-Type', 'application/xml');
@@ -341,17 +342,17 @@ app.get('/api/ip/:format', (req, res) => {
   <timestamp>${data.timestamp}</timestamp>
 </response>`);
       break;
-      
+
     case 'yaml':
       res.setHeader('Content-Type', 'application/yaml');
       res.send(`ip: ${data.ip}\ntimestamp: ${data.timestamp}`);
       break;
-      
+
     case 'csv':
       res.setHeader('Content-Type', 'text/csv');
       res.send(`ip,timestamp\n${data.ip},${data.timestamp}`);
       break;
-      
+
     default:
       res.json(data);
   }
