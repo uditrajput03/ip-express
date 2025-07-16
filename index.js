@@ -100,7 +100,7 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Route 1: HTML Response
+// Route 1: HTML Response (homepage)
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -116,63 +116,118 @@ app.get('/', (req, res) => {
         .ip-box h2 { margin-top: 0; }
         pre { background: #eee; padding: 10px; overflow: auto; }
         .footer { margin-top: 30px; font-size: 12px; color: #666; }
+        .ip-list { background: #f4f4f4; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .ip-list ul { list-style: none; padding: 0; }
+        .ip-list li { padding: 5px 0; }
+        .note { color: #b00; font-size: 13px; margin-top: 10px; }
       </style>
     </head>
     <body>
       <h1>IP Address Detector</h1>
-      
       <div class="ip-box">
-        <h2>Your IP Addresses</h2>
+        <h2>Your IP Addresses (Server-side)</h2>
         <p><strong>IPv4:</strong> ${req.ipInfo.detected.ipv4 || 'Not detected'}</p>
         <p><strong>IPv6:</strong> ${req.ipInfo.detected.ipv6 || 'Not detected'}</p>
         <p><strong>Detection source:</strong> ${req.ipInfo.detected.source || 'Unknown'}</p>
       </div>
-      
       <div class="ip-box">
         <h2>Raw Connection Data</h2>
         <p><strong>Direct connection IP:</strong> ${req.ipInfo.connection.direct}</p>
         <p><strong>Protocol:</strong> ${req.ipInfo.connection.protocol}</p>
         <p><strong>Port:</strong> ${req.ipInfo.connection.port}</p>
       </div>
-      
       <div class="ip-box">
         <h2>Express Detection</h2>
         <p><strong>req.ip:</strong> ${req.ip}</p>
         <p><strong>req.ips:</strong> ${JSON.stringify(req.ips)}</p>
       </div>
-      
       <div class="ip-box">
         <h2>Header Information</h2>
         <pre>${JSON.stringify(req.headers, null, 2)}</pre>
       </div>
-      
       <div class="ip-box">
         <h2>API Endpoints</h2>
         <p>Get as JSON: <a href="/api/ip">/api/ip</a></p>
         <p>Get as plain text: <a href="/api/ip/text">/api/ip/text</a></p>
         <p>Get full details: <a href="/api/ip/details">/api/ip/details</a></p>
         <p>External verification: <a href="/api/ip/verify">/api/ip/verify</a></p>
+        <p>WebRTC IP detection: <a href="/webrtc">/webrtc</a></p>
       </div>
-      
+      <div class="ip-list">
+        <h2>Your Public IP Addresses (via WebRTC STUN):</h2>
+        <ul id="ip-list">
+          <li>Detecting...</li>
+        </ul>
+        <div class="note" id="note"></div>
+      </div>
       <div class="footer">
         <p>Server Time (UTC): ${new Date().toISOString()}</p>
         <p>Request ID: ${Math.random().toString(36).substring(2, 15)}</p>
       </div>
-      
       <script>
-        // Client-side detection as a fallback
-        async function detectClientSideIP() {
-          try {
-            const response = await fetch('https://ipv4.jsonip.com/');
-            const data = await response.json();
-            document.getElementById('client-side-ip').textContent = data.ip;
-          } catch (e) {
-            document.getElementById('client-side-ip').textContent = 'Detection failed';
-          }
+        function isIpAddress(ip) {
+          // IPv4 or IPv6 regex
+          return /^([0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ip) || /^[a-fA-F0-9:]+$/.test(ip);
         }
-        
-        // Uncomment to enable client-side detection
-        // detectClientSideIP();
+        function getWebRTCIpsWithStun(callback) {
+          const ips = new Set();
+          const RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
+          if (!RTCPeerConnection) {
+            callback(['WebRTC not supported']);
+            return;
+          }
+          const stunServers = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' }
+          ];
+          let pending = stunServers.length;
+          stunServers.forEach(server => {
+            const pc = new RTCPeerConnection({ iceServers: [server] });
+            pc.createDataChannel('');
+            pc.createOffer().then(offer => pc.setLocalDescription(offer));
+            pc.onicecandidate = function(event) {
+              if (!event || !event.candidate) {
+                pending--;
+                if (pending === 0) {
+                  callback(Array.from(ips));
+                }
+                return;
+              }
+              const candidate = event.candidate.candidate;
+              const parts = candidate.split(' ');
+              const ip = parts[4];
+              if (ip && isIpAddress(ip) && !ips.has(ip)) {
+                ips.add(ip);
+              }
+            };
+          });
+        }
+        getWebRTCIpsWithStun(function(ipList) {
+          const ul = document.getElementById('ip-list');
+          const note = document.getElementById('note');
+          ul.innerHTML = '';
+          if (ipList.length === 0) {
+            ul.innerHTML = '<li>No public IPs detected</li>';
+            note.textContent = 'Modern browsers may hide your real IPs for privacy (mDNS obfuscation).';
+          } else {
+            let realIps = ipList.filter(ip => !ip.endsWith('.local'));
+            if (realIps.length === 0) {
+              ul.innerHTML = '<li>Only mDNS hostnames detected (no real IPs)</li>';
+              note.textContent = 'Your browser is hiding your real IPs for privacy (mDNS obfuscation).';
+            } else {
+              realIps.forEach(ip => {
+                const li = document.createElement('li');
+                li.textContent = ip;
+                ul.appendChild(li);
+              });
+              if (realIps.length < ipList.length) {
+                note.textContent = 'Some IPs are hidden by your browser for privacy.';
+              } else {
+                note.textContent = '';
+              }
+            }
+          }
+        });
       </script>
     </body>
     </html>
